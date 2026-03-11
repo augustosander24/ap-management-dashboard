@@ -1,13 +1,13 @@
-invoice_id,vendor_name,invoice_date,due_date,payment_date,invoice_amount,amount_paid,currency,status,payment_method,invoice_category,aging_bucket,days_to_pay,month,year
-INV-1001,Office Supply Co,2025-01-03,2025-02-02,2025-01-28,245.50,245.50,USD,Paid,ACH,Office Supplies,Current,25,January,2025
-INV-1002,Logistics Partners,2025-01-05,2025-02-04,2025-02-06,1875.00,1875.00,USD,Paid,Wire,Freight,1-30 Days,32,January,2025
-INV-1003,Packaging World,2025-01-08,2025-02-07,2025-02-05,642.80,642.80,USD,Paid,ACH,Packaging,Current,28,January,2025
-INV-1004,Fresh Beverages Inc,2025-01-10,2025-02-09,,3250.00,0.00,USD,Open,,Inventory,31-60 Days,,January,2025
-INV-1005,City Utilities,2025-01-12,2025-02-11,2025-02-10,489.22,489.22,USD,Paid,ACH,Utilities,Current,29,January,2025
-INV-1006,Northside Transport,2025-01-15,2025-02-14,2025-02-20,2210.75,2210.75,USD,Paid,Wire,Freight,1-30 Days,36,January,2025
-INV-1007,IT Services Group,2025-01-18,2025-02-17,2025-02-14,980.00,980.00,USD,Paid,ACH,Professional Services,Current,27,January,2025
-INV-1008,Vendor One Foods,2025-01-22,2025-02-21,,1575.40,0.00,USD,Open,,Inventory,1-30 Days,,January,2025
-INV-1009,Cleaning Solutions,2025-01-25,2025-02-24,2025-02-22,315.60,315.60,USD,Paid,Check,Facilities,Current,28,January,2025
-INV-1010,Metro Packaging,2025-01-28,2025-02-27,2025-03-03,728.90,728.90,USD,Paid,ACH,Packaging,1-30 Days,34,January,2025
-INV-1011,Office Supply Co,2025-02-03,2025-03-05,2025-03-01,198.40,198.40,USD,Paid,ACH,Office Supplies,Current,26,February,2025
-INV-1012,Logistics Partners,2025-02-06,2025-03-08,,2105.00,0.00,USD,Open,,Freight,1-30 Days,,February,2025
+invoice_id,vendor_name,company_code,invoice_date,due_date,payment_date,invoice_amount,amount_paid,currency,status,payment_method,payment_terms,invoice_category,aging_bucket,days_to_pay,month,year
+INV-1001,Office Supply Co,US01,2025-01-03,2025-02-02,2025-01-28,245.50,245.50,USD,Paid,ACH,Net 30,Office Supplies,Current,25,January,2025
+INV-1002,Logistics Partners,US01,2025-01-05,2025-02-04,2025-02-06,1875.00,1875.00,USD,Paid,Wire,Net 30,Freight,1-30 Days,32,January,2025
+INV-1003,Packaging World,US01,2025-01-08,2025-02-07,2025-02-05,642.80,642.80,USD,Paid,ACH,Net 30,Packaging,Current,28,January,2025
+INV-1004,Fresh Beverages Inc,US01,2025-01-10,2025-02-09,,3250.00,0.00,USD,Open,,Net 30,Inventory,31-60 Days,,January,2025
+INV-1005,City Utilities,US01,2025-01-12,2025-02-11,2025-02-10,489.22,489.22,USD,Paid,ACH,Net 30,Utilities,Current,29,January,2025
+INV-1006,Northside Transport,US01,2025-01-15,2025-02-14,2025-02-20,2210.75,2210.75,USD,Paid,Wire,Net 30,Freight,1-30 Days,36,January,2025
+INV-1007,IT Services Group,US01,2025-01-18,2025-02-17,2025-02-14,980.00,980.00,USD,Paid,ACH,Net 30,Professional Services,Current,27,January,2025
+INV-1008,Vendor One Foods,US01,2025-01-22,2025-02-21,,1575.40,0.00,USD,Open,,Net 30,Inventory,1-30 Days,,January,2025
+INV-1009,Cleaning Solutions,US01,2025-01-25,2025-02-24,2025-02-22,315.60,315.60,USD,Paid,Check,Net 30,Facilities,Current,28,January,2025
+INV-1010,Metro Packaging,US01,2025-01-28,2025-02-27,2025-03-03,728.90,728.90,USD,Paid,ACH,Net 30,Packaging,1-30 Days,34,January,2025
+INV-1011,Office Supply Co,US01,2025-02-03,2025-03-05,2025-03-01,198.40,198.40,USD,Paid,ACH,Net 30,Office Supplies,Current,26,February,2025
+INV-1012,Logistics Partners,US01,2025-02-06,2025-03-08,,2105.00,0.00,USD,Open,,Net 30,Freight,1-30 Days,,February,2025
