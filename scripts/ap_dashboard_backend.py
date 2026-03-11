@@ -1,6 +1,7 @@
 """
 AP Management Dashboard Backend
 Author: Augusto Sander
+
 Project purpose:
 Transform raw ERP-style accounts payable invoice data into a dashboard-ready file
 for Excel reporting and management analysis.
@@ -30,6 +31,31 @@ def load_data(file_path):
     return pd.read_csv(file_path)
 
 
+def clean_date_columns(df):
+    """
+    Convert ERP date fields into pandas datetime format so AP timing
+    calculations can be performed accurately.
+
+    These dates drive:
+    - due date analysis
+    - payment timing
+    - overdue flags
+    - aging buckets
+    """
+    date_columns = [
+        "invoice_date",
+        "posting_date",
+        "due_date",
+        "payment_date",
+        "discount_due_date"
+    ]
+
+    for col in date_columns:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    return df
+
+
 def main():
     """
     Main workflow:
@@ -39,13 +65,14 @@ def main():
     4. Export dashboard-ready data for Excel
     """
     df = load_data(RAW_FILE)
+    df = clean_date_columns(df)
 
     print("Data loaded successfully.")
     print(f"Rows: {len(df)}")
     print(f"Columns: {len(df.columns)}")
+    print("Date columns cleaned successfully.")
 
     # Next steps will be added here:
-    # - convert date columns
     # - calculate days_to_pay
     # - calculate overdue flags
     # - create aging buckets
