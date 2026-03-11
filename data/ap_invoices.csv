@@ -1,5 +1,4 @@
 invoice_id,vendor_name,company_code,invoice_date,due_date,payment_date,invoice_amount,amount_paid,currency,status,payment_method,payment_terms,invoice_category,aging_bucket,days_to_pay,month,year
-invoice_id,vendor_name,company_code,invoice_date,due_date,payment_date,invoice_amount,amount_paid,currency,status,payment_method,payment_terms,invoice_category,aging_bucket,days_to_pay,month,year
 INV-1001,Office Supply Co,US01,2025-01-03,2025-02-02,2025-01-28,245.50,245.50,USD,Paid,ACH,Net 30,Office Supplies,Current,25,January,2025
 INV-1002,Logistics Partners,US01,2025-01-05,2025-02-04,2025-02-06,1875.00,1875.00,USD,Paid,Wire,Net 30,Freight,1-30 Days,32,January,2025
 INV-1003,Packaging World,US01,2025-01-08,2025-02-07,2025-02-05,642.80,642.80,USD,Paid,ACH,Net 30,Packaging,Current,28,January,2025
