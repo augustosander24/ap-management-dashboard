@@ -12,6 +12,16 @@ and AP operational efficiency using realistic invoice data.
 
 Snapshot date for reporting:
 June 30, 2025
+
+Reporting currency:
+All KPI summaries are reported in USD.
+Invoices in EUR and MXN are converted using fixed snapshot-date FX rates.
+Original currency and original amounts are preserved in the dataset.
+
+FX rates used (as of June 30, 2025 snapshot):
+    EUR to USD: 1.0721
+    MXN to USD: 0.0572
+    USD to USD: 1.0000
 """
 
 # Import required libraries
@@ -23,19 +33,43 @@ RAW_FILE = "data/ap_invoices.csv"
 OUTPUT_FILE = "output/ap_invoices_dashboard_ready.csv"
 SNAPSHOT_DATE = pd.Timestamp("2025-06-30")
 
+# FX conversion rates to USD — fixed as of snapshot date June 30, 2025
+# These rates allow all KPI totals to be reported in a single reporting currency
+# Original currency and original amounts are always preserved in the dataset
+FX_RATES_TO_USD = {
+    "USD": 1.0000,
+    "EUR": 1.0721,
+    "MXN": 0.0572,
+}
+
 
 def load_data(file_path):
     """
     Load the raw AP invoice dataset exported from the ERP-style source file.
+    Validates that all required columns are present before any processing begins.
+
+    Business meaning:
+    In a real ERP environment, missing columns in an export would cause silent
+    downstream errors. Early validation catches data quality issues immediately.
     """
     df = pd.read_csv(file_path)
 
-    # Validate required columns exist before any processing begins
-    # In a real ERP export, missing columns would cause silent errors downstream
+    # Validate all required columns exist before any processing begins
     required_columns = [
-        "invoice_num", "posting_date", "due_date", "payment_date",
-        "invoice_amount", "amount_paid", "status", "po_number",
-        "discount_terms", "discount_amount", "discount_due_date"
+        "invoice_num",
+        "invoice_date",
+        "posting_date",
+        "due_date",
+        "payment_date",
+        "invoice_amount",
+        "amount_paid",
+        "currency",
+        "status",
+        "vendor_num",
+        "po_number",
+        "discount_terms",
+        "discount_amount",
+        "discount_due_date",
     ]
     missing = [col for col in required_columns if col not in df.columns]
     if missing:
@@ -60,33 +94,68 @@ def clean_date_columns(df):
         "posting_date",
         "due_date",
         "payment_date",
-        "discount_due_date"
+        "discount_due_date",
     ]
-
     for col in date_columns:
         df[col] = pd.to_datetime(df[col], errors="coerce")
 
     return df
 
 
+def apply_fx_conversion(df):
+    """
+    Convert invoice and payment amounts to USD reporting currency.
+
+    Business meaning:
+    AP dashboards that mix currencies (USD, EUR, MXN) without conversion
+    produce totals that are not finance-valid. A controller or CFO reviewing
+    total spend or overdue exposure needs a single reporting currency.
+
+    This function preserves all original amounts and currency codes, then adds
+    USD-equivalent columns used exclusively for KPI summary calculations.
+
+    Key outputs:
+    - invoice_amount_usd: invoice_amount converted to USD
+    - amount_paid_usd: amount_paid converted to USD
+    - fx_rate_used: the conversion rate applied, for auditability
+
+    Logic:
+    - FX rates are fixed as of the snapshot date (June 30, 2025)
+    - Unrecognized currencies default to a 1.0 rate and are flagged
+    - Original currency and original amounts are never modified
+    """
+    df["fx_rate_used"] = df["currency"].map(FX_RATES_TO_USD)
+
+    unrecognized = df[df["fx_rate_used"].isna()]["currency"].unique()
+    if len(unrecognized) > 0:
+        print(f"  WARNING: Unrecognized currencies found — defaulting to 1.0: {unrecognized}")
+        df["fx_rate_used"] = df["fx_rate_used"].fillna(1.0)
+
+    df["invoice_amount_usd"] = (df["invoice_amount"] * df["fx_rate_used"]).round(2)
+    df["amount_paid_usd"] = (df["amount_paid"] * df["fx_rate_used"]).round(2)
+
+    return df
+
+
 def calculate_days_to_pay(df):
     """
-    Calculate days_to_pay for paid invoices only.
+    Calculate days_to_pay for fully paid invoices only.
 
     Business meaning:
     This measures how long it took AP to pay the invoice after it was posted.
-    It is a practical AP efficiency metric and supports the dashboard KPI:
-    average payment timing (Days Payable Outstanding proxy).
+    It is a core AP efficiency metric that feeds the average payment timing KPI.
 
     Logic:
     - Use payment_date minus posting_date
-    - Only calculate for invoices that have actually been paid
-    - Leave blank for unpaid, blocked, overdue, voided, or in-review items
+    - Only calculated for invoices with status Paid
+    - Partially Paid is explicitly excluded — a partial payment does not mean
+      the invoice is settled, and including it would distort the average
+    - All other statuses (Open, Overdue, Blocked, In Review, Voided) are excluded
     """
     df["days_to_pay"] = (df["payment_date"] - df["posting_date"]).dt.days
 
-    unpaid_statuses = ["Open", "Overdue", "Blocked", "In Review", "Voided"]
-    df.loc[df["status"].isin(unpaid_statuses), "days_to_pay"] = pd.NA
+    excluded_statuses = ["Open", "Overdue", "Blocked", "In Review", "Voided", "Partially Paid"]
+    df.loc[df["status"].isin(excluded_statuses), "days_to_pay"] = pd.NA
     df.loc[df["payment_date"].isna(), "days_to_pay"] = pd.NA
 
     return df
@@ -97,24 +166,24 @@ def calculate_overdue_metrics(df, snapshot_date):
     Calculate outstanding balance and overdue status as of the reporting snapshot date.
 
     Business meaning:
-    AP managers do not only care whether an invoice was ever paid.
-    They need to know what amount is still outstanding and whether that balance
-    is now past due as of the reporting date.
+    AP managers need to know not just whether an invoice was paid, but what
+    amount is still outstanding and whether that balance is now past due.
+    Outstanding exposure drives cash flow planning and vendor relationship risk.
 
     Key outputs:
-    - outstanding_amount: unpaid balance still open on the invoice
-    - is_overdue: TRUE when there is still an unpaid balance and the due date
-      is before the snapshot date
+    - outstanding_amount: unpaid balance in original currency
+    - outstanding_amount_usd: unpaid balance converted to USD for KPI totals
+    - is_overdue: TRUE when unpaid balance exists and due date has passed
     - days_past_due: number of days overdue as of the snapshot date
 
     Logic:
-    - outstanding_amount = invoice_amount - amount_paid
-    - never allow negative outstanding balances (clip at zero)
-    - voided invoices are excluded from overdue risk
-    - partial payments can still be overdue if a balance remains unpaid
+    - outstanding_amount = invoice_amount minus amount_paid
+    - clip at zero to prevent negative balances from data entry errors
+    - voided invoices are excluded from overdue risk entirely
+    - partial payments can still be overdue if a balance remains
     """
-    df["outstanding_amount"] = df["invoice_amount"] - df["amount_paid"]
-    df["outstanding_amount"] = df["outstanding_amount"].clip(lower=0)
+    df["outstanding_amount"] = (df["invoice_amount"] - df["amount_paid"]).clip(lower=0)
+    df["outstanding_amount_usd"] = (df["invoice_amount_usd"] - df["amount_paid_usd"]).clip(lower=0)
 
     df["is_overdue"] = (
         (df["outstanding_amount"] > 0) &
@@ -135,62 +204,49 @@ def assign_aging_bucket(df):
     Assign aging buckets for unpaid overdue balances.
 
     Business meaning:
-    Aging buckets are one of the most universal tools in AP reporting.
-    They show management how long overdue balances have been sitting unpaid,
-    and help prioritize which vendors need immediate outreach or escalation.
+    Aging buckets are the most universal AP risk reporting tool.
+    They show management how long overdue balances have been sitting unpaid
+    and help prioritize which vendors need immediate payment or escalation.
+    The further right a balance moves in the aging schedule, the higher the risk.
 
     Bucket logic:
-    - Current: invoice is not overdue
-    - 0-30 days: overdue by 0 to 30 days
-    - 31-60 days: overdue by 31 to 60 days
-    - 61-90 days: overdue by 61 to 90 days
-    - 90+ days: overdue by more than 90 days (highest risk)
+    - Current:     invoice is not overdue
+    - 0-30 Days:   overdue by 0 to 30 days
+    - 31-60 Days:  overdue by 31 to 60 days
+    - 61-90 Days:  overdue by 61 to 90 days
+    - 90+ Days:    overdue by more than 90 days — highest risk category
     """
     df["aging_bucket"] = "Current"
 
-    df.loc[
-        df["is_overdue"] & df["days_past_due"].between(0, 30),
-        "aging_bucket"
-    ] = "0-30 Days"
-
-    df.loc[
-        df["is_overdue"] & df["days_past_due"].between(31, 60),
-        "aging_bucket"
-    ] = "31-60 Days"
-
-    df.loc[
-        df["is_overdue"] & df["days_past_due"].between(61, 90),
-        "aging_bucket"
-    ] = "61-90 Days"
-
-    df.loc[
-        df["is_overdue"] & (df["days_past_due"] > 90),
-        "aging_bucket"
-    ] = "90+ Days"
+    df.loc[df["is_overdue"] & df["days_past_due"].between(0, 30),  "aging_bucket"] = "0-30 Days"
+    df.loc[df["is_overdue"] & df["days_past_due"].between(31, 60), "aging_bucket"] = "31-60 Days"
+    df.loc[df["is_overdue"] & df["days_past_due"].between(61, 90), "aging_bucket"] = "61-90 Days"
+    df.loc[df["is_overdue"] & (df["days_past_due"] > 90),          "aging_bucket"] = "90+ Days"
 
     return df
 
 
 def calculate_discount_metrics(df, snapshot_date):
     """
-    Calculate discount eligibility, discount capture, and missed discount value.
+    Calculate discount eligibility, capture, and missed value.
 
     Business meaning:
-    Early payment discounts (typically 2% if paid within 10 days) represent
-    real savings that AP teams are responsible for capturing. Missed discounts
-    are a direct cost to the business and a measurable AP performance gap.
+    Early payment discounts (2% if paid within 10 days on 2/10 Net 30 terms)
+    represent real savings that AP teams are responsible for capturing.
+    Missed discounts are a direct, measurable cost to the business.
+    Discount capture rate is a standard AP performance KPI.
 
     Key outputs:
-    - is_discount_eligible: invoice has a valid 2/10 discount opportunity
-    - discount_captured_calc: fully paid within the discount window
-    - discount_missed_calc: discount opportunity expired without being captured
-    - captured_discount_value: dollar value successfully captured
-    - missed_discount_value: dollar value left on the table
+    - is_discount_eligible: invoice qualifies for an early payment discount
+    - discount_captured_calc: invoice was fully paid within the discount window
+    - discount_missed_calc: discount window closed without full payment
+    - captured_discount_value: USD value of discounts successfully captured
+    - missed_discount_value: USD value left on the table
 
     Logic:
-    - Only 2/10 Net 30 invoices with a discount amount and due date are eligible
-    - Capture only counts when the invoice is fully paid on or before discount_due_date
-    - A discount is missed if paid after the window or still unpaid after window closed
+    - Only 2/10 Net 30 invoices with a discount amount and discount_due_date qualify
+    - Capture requires full payment (status Paid) on or before discount_due_date
+    - Missed means paid after the window OR still unpaid after the window closed
     """
     df["is_discount_eligible"] = (
         df["discount_terms"].fillna("").str.contains("2/10", case=False) &
@@ -221,28 +277,31 @@ def calculate_discount_metrics(df, snapshot_date):
     )
 
     df["captured_discount_value"] = 0.00
-    df.loc[df["discount_captured_calc"], "captured_discount_value"] = df["discount_amount"]
+    df.loc[df["discount_captured_calc"], "captured_discount_value"] = (
+        df["discount_amount"] * df["fx_rate_used"]
+    ).round(2)
 
     df["missed_discount_value"] = 0.00
-    df.loc[df["discount_missed_calc"], "missed_discount_value"] = df["discount_amount"]
+    df.loc[df["discount_missed_calc"], "missed_discount_value"] = (
+        df["discount_amount"] * df["fx_rate_used"]
+    ).round(2)
 
     return df
 
 
 def calculate_po_match_metrics(df):
     """
-    Flag PO-based invoices and identify first-pass match performance.
+    Flag PO-based invoices and calculate first-pass match performance.
 
     Business meaning:
     First-pass match rate measures how often PO-backed invoices moved through
-    the AP process without exceptions. A high first-pass rate means the
-    procurement and AP workflow is aligned. A low rate signals mismatches
-    between purchase orders and vendor invoices, which create processing delays
-    and block timely payment.
+    AP without exceptions. A high rate means procurement and AP are aligned.
+    A low rate signals PO-to-invoice mismatches that cause delays and block
+    vendor payments — a common source of vendor relationship friction.
 
     Key outputs:
-    - is_po_based: invoice is tied to a purchase order
-    - has_po_exception: PO invoice landed in Blocked or In Review status
+    - is_po_based: invoice is linked to a purchase order
+    - has_po_exception: PO invoice is currently Blocked or In Review
     - first_pass_match: PO invoice cleared with no exception
 
     Logic:
@@ -250,7 +309,10 @@ def calculate_po_match_metrics(df):
     - Exception means status is Blocked or In Review
     - First-pass match is TRUE only for PO-based invoices with no exception
     """
-    df["is_po_based"] = df["po_number"].notna() & (df["po_number"].astype(str).str.strip() != "")
+    df["is_po_based"] = (
+        df["po_number"].notna() &
+        (df["po_number"].astype(str).str.strip() != "")
+    )
 
     df["has_po_exception"] = (
         df["is_po_based"] &
@@ -272,17 +334,15 @@ def flag_anomalies(df, snapshot_date):
     Business meaning:
     Exception management is one of the most time-consuming parts of real AP
     operations. This function automates anomaly detection so the dashboard
-    can surface issues that would otherwise require manual review.
+    surfaces issues that would otherwise require manual daily review.
 
     Anomalies flagged:
-    - Late payment: invoice was paid but payment_date exceeded due_date
-    - Blocked > 30 days: invoice has been sitting on payment block for over a month
-    - Missed discount: eligible for early payment discount but window was not used
-    - Duplicate risk: same vendor billed the same amount within a 30-day window
-    - In Review > 15 days: invoice has been under review for an extended period
+    - Late payment:        invoice was paid after the due date
+    - Blocked > 30 days:   payment block active for more than 30 days
+    - In Review > 15 days: invoice under review for more than 15 days
+    - Missed discount:     eligible for early payment discount but window passed
+    - Duplicate risk:      same vendor billed the same amount within 30 days
     """
-
-    # Late payment: paid invoices where payment came in after the due date
     df["late_payment_flag"] = (
         (df["status"] == "Paid") &
         df["payment_date"].notna() &
@@ -290,25 +350,20 @@ def flag_anomalies(df, snapshot_date):
         (df["payment_date"] > df["due_date"])
     )
 
-    # Blocked > 30 days: payment block has been active for more than 30 days
     df["blocked_over_30_days"] = (
         (df["status"] == "Blocked") &
         df["posting_date"].notna() &
         ((snapshot_date - df["posting_date"]).dt.days > 30)
     )
 
-    # In Review > 15 days: invoice has been under review for more than 15 days
     df["in_review_over_15_days"] = (
         (df["status"] == "In Review") &
         df["posting_date"].notna() &
         ((snapshot_date - df["posting_date"]).dt.days > 15)
     )
 
-    # Missed discount: eligible invoice where discount window passed without capture
     df["missed_discount_flag"] = df["discount_missed_calc"]
 
-    # Duplicate risk: same vendor_num and same invoice_amount posted within 30 days
-    # Sort by vendor and date to enable window comparison
     df_sorted = df.sort_values(["vendor_num", "posting_date"]).copy()
     df_sorted["prev_amount"] = df_sorted.groupby("vendor_num")["invoice_amount"].shift(1)
     df_sorted["prev_posting"] = df_sorted.groupby("vendor_num")["posting_date"].shift(1)
@@ -321,7 +376,6 @@ def flag_anomalies(df, snapshot_date):
         (df_sorted["days_since_prev"] <= 30)
     )
 
-    # Merge duplicate flag back to original dataframe on invoice_num
     df = df.merge(
         df_sorted[["invoice_num", "duplicate_risk_flag"]],
         on="invoice_num",
@@ -334,25 +388,22 @@ def flag_anomalies(df, snapshot_date):
 
 def prepare_dashboard_fields(df, snapshot_date):
     """
-    Create Excel-friendly helper fields for dashboard building.
+    Create Excel-friendly helper fields for dashboard and exception reporting.
 
     Business meaning:
-    These fields make it easier to build charts, KPI cards, and the exception
-    table in Excel without rebuilding logic in formulas or pivot tables.
-    The goal is to make the Excel layer purely visual with no calculation burden.
+    These fields eliminate formula complexity in Excel so the dashboard layer
+    is purely visual. Every calculation stays in Python where it can be
+    version-controlled, tested, and explained.
 
-    Key outputs:
-    - posting_month_num / posting_month_name / posting_month_label
-    - is_exception: highlights items needing management attention
-    - issue_type: plain-English issue label for the exception report tab
-    - days_open_as_of_snapshot: how long an unpaid balance has been outstanding
-    - urgency_level: priority flag for sorting the exception report
+    Issue type priority order (most specific label wins):
+    Overdue is assigned first as a base, then more specific conditions overwrite it.
+    This ensures a blocked invoice that is also overdue shows Blocked Over 30 Days
+    rather than the generic Overdue Invoice label.
     """
     df["posting_month_num"] = df["posting_date"].dt.month
     df["posting_month_name"] = df["posting_date"].dt.strftime("%b")
     df["posting_month_label"] = df["posting_date"].dt.strftime("%b %Y")
 
-    # is_exception: any invoice that requires management attention
     df["is_exception"] = (
         df["status"].isin(["Blocked", "In Review", "Partially Paid", "Voided"]) |
         df["is_overdue"] |
@@ -363,20 +414,16 @@ def prepare_dashboard_fields(df, snapshot_date):
         df["in_review_over_15_days"]
     )
 
-    # issue_type: plain-English label for the exception report
-    # Priority order: most severe condition takes the label
     df["issue_type"] = ""
-    df.loc[df["late_payment_flag"], "issue_type"] = "Late Payment"
-    df.loc[df["missed_discount_flag"], "issue_type"] = "Missed Discount"
-    df.loc[df["duplicate_risk_flag"], "issue_type"] = "Duplicate Risk"
+    df.loc[df["is_overdue"],                "issue_type"] = "Overdue Invoice"
+    df.loc[df["late_payment_flag"],          "issue_type"] = "Late Payment"
+    df.loc[df["missed_discount_flag"],       "issue_type"] = "Missed Discount"
+    df.loc[df["duplicate_risk_flag"],        "issue_type"] = "Duplicate Risk"
     df.loc[df["status"] == "Partially Paid", "issue_type"] = "Partial Payment Outstanding"
-    df.loc[df["status"] == "Voided", "issue_type"] = "Voided Invoice"
-    df.loc[df["in_review_over_15_days"], "issue_type"] = "In Review Over 15 Days"
-    df.loc[df["blocked_over_30_days"], "issue_type"] = "Blocked Over 30 Days"
-    df.loc[df["is_overdue"], "issue_type"] = "Overdue Invoice"  # highest priority — overwrites
+    df.loc[df["status"] == "Voided",         "issue_type"] = "Voided Invoice"
+    df.loc[df["in_review_over_15_days"],     "issue_type"] = "In Review Over 15 Days"
+    df.loc[df["blocked_over_30_days"],       "issue_type"] = "Blocked Over 30 Days"
 
-    # urgency_level: for sorting the exception table in Excel
-    # Red = act now, Amber = monitor, Yellow = low priority
     df["urgency_level"] = ""
     df.loc[df["issue_type"].isin([
         "Overdue Invoice", "Blocked Over 30 Days"
@@ -388,7 +435,6 @@ def prepare_dashboard_fields(df, snapshot_date):
         "Late Payment", "Duplicate Risk", "Voided Invoice"
     ]), "urgency_level"] = "Yellow"
 
-    # days_open_as_of_snapshot: how long any unpaid balance has been sitting open
     df["days_open_as_of_snapshot"] = pd.NA
     open_balance_mask = (df["outstanding_amount"] > 0) & (df["status"] != "Voided")
     df.loc[open_balance_mask, "days_open_as_of_snapshot"] = (
@@ -404,9 +450,8 @@ def export_dashboard_file(df, file_path):
 
     Business meaning:
     This file is the bridge between Python and Excel.
-    Python handles all AP logic and calculations.
-    Excel handles the final management dashboard and visual presentation.
-    Sorted by posting date so the Excel layer reads chronologically.
+    Python owns all AP logic, calculations, and anomaly detection.
+    Excel owns the visual dashboard and management presentation layer.
     """
     df = df.sort_values(by=["posting_date", "invoice_num"]).reset_index(drop=True)
     df.to_csv(file_path, index=False)
@@ -414,47 +459,44 @@ def export_dashboard_file(df, file_path):
 
 def print_summary(df):
     """
-    Print a business-readable summary to the terminal when the script runs.
-
-    Business meaning:
-    When a recruiter or manager runs this script, they should see real AP
-    numbers immediately — not just technical confirmation messages.
-    This output mirrors what an AP manager would want to see in a morning report.
+    Print a business-readable AP summary to the terminal when the script runs.
+    All KPI totals are in USD (reporting currency).
     """
-    total_invoices = len(df)
-    total_spend = df["invoice_amount"].sum()
-    overdue_count = df["is_overdue"].sum()
-    overdue_exposure = df.loc[df["is_overdue"], "outstanding_amount"].sum()
-    avg_days_to_pay = df["days_to_pay"].mean()
-    discount_eligible = df["is_discount_eligible"].sum()
-    discount_captured = df["discount_captured_calc"].sum()
-    missed_discount_value = df["missed_discount_value"].sum()
-    po_based = df["is_po_based"].sum()
-    first_pass = df["first_pass_match"].sum()
-    exceptions = df["is_exception"].sum()
+    total_invoices  = len(df)
+    total_spend_usd = df["invoice_amount_usd"].sum()
+    overdue_count   = df["is_overdue"].sum()
+    overdue_usd     = df.loc[df["is_overdue"], "outstanding_amount_usd"].sum()
+    avg_days        = df["days_to_pay"].mean()
+    disc_eligible   = df["is_discount_eligible"].sum()
+    disc_captured   = df["discount_captured_calc"].sum()
+    missed_disc_usd = df["missed_discount_value"].sum()
+    po_based        = df["is_po_based"].sum()
+    first_pass      = df["first_pass_match"].sum()
+    exceptions      = df["is_exception"].sum()
+    currency_mix    = dict(df["currency"].value_counts())
 
     print("=" * 55)
     print("  AP OPERATIONS SUMMARY — Snapshot: June 30, 2025")
+    print("  All totals reported in USD (reporting currency)")
     print("=" * 55)
     print(f"  Total invoices processed    : {total_invoices}")
-    print(f"  Total invoice spend         : ${total_spend:,.2f}")
+    print(f"  Total invoice spend (USD)   : ${total_spend_usd:,.2f}")
+    print(f"  Currency mix                : {currency_mix}")
     print("-" * 55)
     print(f"  Overdue invoices            : {overdue_count}")
-    print(f"  Overdue exposure            : ${overdue_exposure:,.2f}")
-    print(f"  Avg days to pay             : {avg_days_to_pay:.1f} days")
+    print(f"  Overdue exposure (USD)      : ${overdue_usd:,.2f}")
+    print(f"  Avg days to pay             : {avg_days:.1f} days")
     print("-" * 55)
-    print(f"  Discount eligible invoices  : {discount_eligible}")
-    print(f"  Discounts captured          : {discount_captured} of {discount_eligible}")
-    if discount_eligible > 0:
-        capture_rate = (discount_captured / discount_eligible) * 100
-        print(f"  Discount capture rate       : {capture_rate:.0f}%")
-    print(f"  Missed discount value       : ${missed_discount_value:,.2f}")
+    print(f"  Discount eligible invoices  : {disc_eligible}")
+    print(f"  Discounts captured          : {disc_captured} of {disc_eligible}")
+    if disc_eligible > 0:
+        print(f"  Discount capture rate       : {(disc_captured / disc_eligible) * 100:.0f}%")
+    print(f"  Missed discount value (USD) : ${missed_disc_usd:,.2f}")
     print("-" * 55)
     print(f"  PO-based invoices           : {po_based}")
     print(f"  First-pass match            : {first_pass} of {po_based}")
     if po_based > 0:
-        fpm_rate = (first_pass / po_based) * 100
-        print(f"  First-pass match rate       : {fpm_rate:.0f}%")
+        print(f"  First-pass match rate       : {(first_pass / po_based) * 100:.0f}%")
     print("-" * 55)
     print(f"  Total exceptions flagged    : {exceptions}")
     print("=" * 55)
@@ -465,16 +507,22 @@ def print_summary(df):
 def main():
     """
     Main workflow:
-    1. Load and validate raw invoice data
-    2. Clean and standardize date fields
-    3. Calculate AP reporting metrics
-    4. Detect anomalies and exceptions
-    5. Prepare Excel-friendly dashboard fields
-    6. Export dashboard-ready CSV
-    7. Print business summary to terminal
+    1.  Load and validate raw invoice data
+    2.  Clean and standardize date fields
+    3.  Apply FX conversion to USD reporting currency
+    4.  Calculate days to pay (fully paid invoices only)
+    5.  Calculate overdue metrics and outstanding balances
+    6.  Assign aging buckets
+    7.  Calculate discount capture metrics
+    8.  Calculate PO match and first-pass rate
+    9.  Flag anomalies and exceptions
+    10. Prepare Excel-friendly dashboard fields
+    11. Export dashboard-ready CSV
+    12. Print business summary to terminal
     """
     df = load_data(RAW_FILE)
     df = clean_date_columns(df)
+    df = apply_fx_conversion(df)
     df = calculate_days_to_pay(df)
     df = calculate_overdue_metrics(df, SNAPSHOT_DATE)
     df = assign_aging_bucket(df)
