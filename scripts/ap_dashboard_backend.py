@@ -174,9 +174,18 @@ def calculate_overdue_metrics(df, snapshot_date):
     - outstanding_amount_usd
     - is_overdue
     - days_past_due
+
+    Bug fix:
+    outstanding_amount and outstanding_amount_usd are rounded to 2 decimal places
+    to prevent floating point precision strings like 1336.9199999999998
+    appearing in the CSV export.
     """
-    df["outstanding_amount"] = (df["invoice_amount"] - df["amount_paid"]).clip(lower=0)
-    df["outstanding_amount_usd"] = (df["invoice_amount_usd"] - df["amount_paid_usd"]).clip(lower=0)
+    df["outstanding_amount"] = (
+        (df["invoice_amount"] - df["amount_paid"]).clip(lower=0).round(2)
+    )
+    df["outstanding_amount_usd"] = (
+        (df["invoice_amount_usd"] - df["amount_paid_usd"]).clip(lower=0).round(2)
+    )
 
     df["is_overdue"] = (
         (df["outstanding_amount"] > 0)
@@ -372,10 +381,17 @@ def prepare_dashboard_fields(df, snapshot_date):
     - overdue next
     - more specific anomaly labels last
     - last assignment wins
+
+    Bug fix:
+    posting_month_label is cast to string explicitly after strftime to prevent
+    pandas from treating it as a datetime object during CSV export, which caused
+    it to serialize as a date serial (e.g. 2026-01-25) instead of Jan 2025.
     """
     df["posting_month_num"] = df["posting_date"].dt.month
     df["posting_month_name"] = df["posting_date"].dt.strftime("%b")
-    df["posting_month_label"] = df["posting_date"].dt.strftime("%b %Y")
+
+    # Cast to string explicitly — prevents pandas export treating this as a date
+    df["posting_month_label"] = df["posting_date"].dt.strftime("%b %Y").astype(str)
 
     df["is_exception"] = (
         df["status"].isin(["Blocked", "In Review", "Partially Paid", "Voided"])
@@ -441,11 +457,16 @@ def prepare_dashboard_fields(df, snapshot_date):
 
 def export_dashboard_file(df, file_path):
     """
-    Export the final dashboard-ready dataset for Excel.
+    Export the final dashboard-ready dataset to CSV for Excel.
 
     Business meaning:
     Python owns the AP logic.
     Excel owns the final dashboard presentation.
+
+    Note on date_format:
+    date_format applies only to true datetime columns.
+    posting_month_label is already cast to string in prepare_dashboard_fields
+    so it exports as Jan 2025 not as a date serial.
     """
     output_path = Path(file_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
