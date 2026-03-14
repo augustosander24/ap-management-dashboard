@@ -5,6 +5,13 @@ End-to-end Accounts Payable analytics project built to simulate a real business 
 ## Dashboard Preview
 
 ![AP Management Dashboard](images/dashboard-overview.png)
+
+## Key Files
+
+- [Final Excel Dashboard Workbook](AP_Management_Dashboard.xlsx)
+- [Project Pipeline View](images/project-pipeline.png)
+- [Vendor Analysis View](images/vendor-analysis.png)
+
 ## Project Overview
 
 This project was designed to demonstrate how Accounts Payable data can move through a full reporting pipeline:
