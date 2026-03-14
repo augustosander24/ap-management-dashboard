@@ -2,6 +2,9 @@
 
 End-to-end Accounts Payable analytics project built to simulate a real business reporting workflow from raw ERP-style invoice data to management-facing KPI reporting.
 
+## Dashboard Preview
+
+![AP Management Dashboard](images/dashboard-overview.png)
 ## Project Overview
 
 This project was designed to demonstrate how Accounts Payable data can move through a full reporting pipeline:
