@@ -64,7 +64,7 @@ This query measures which vendors show the highest frequency of late payments, a
 
 ![SQL Analysis - Vendors with Highest Late Payment Frequency](images/sql-q1-late-payment-frequency.png)
 
-## What the Dashboard Tracks 
+## What the Dashboard Tracks
 
 The dashboard is designed to support common AP and finance reporting needs, including:
 
