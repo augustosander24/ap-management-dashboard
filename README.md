@@ -6,11 +6,17 @@ End-to-end Accounts Payable analytics project built to simulate a real business 
 
 ![AP Management Dashboard](images/dashboard-overview.png)
 
+## Workflow View
+
+![Project Pipeline View](images/project-pipeline.png)
+
 ## Key Files
 
 - [Final Excel Dashboard Workbook](AP_Management_Dashboard.xlsx)
 - [Project Pipeline View](images/project-pipeline.png)
-- [Vendor Analysis View](images/vendor-analysis.png)
+- [SQL Spend Concentration Analysis](images/sql-q4-pareto-top-80-spend.png)
+- [SQL Blocked Invoices Analysis](images/sql-q7-blocked-invoices-attention.png)
+- [SQL Late Payment Frequency Analysis](images/sql-q1-late-payment-frequency.png)
 
 ## Project Overview
 
@@ -36,7 +42,29 @@ Rather than showing only spreadsheet formatting, this project demonstrates a mor
 - **SQL** for business-question analysis on cleaned AP data
 - **Excel** for KPI reporting, summary tables, formulas, and dashboard presentation
 
-## What the Dashboard Tracks
+## SQL Analysis Examples
+
+To support the reporting layer, I used SQL to answer practical Accounts Payable business questions around vendor concentration, payment behavior, and invoice exceptions. These queries helped bridge the gap between transformed ERP-style data and management-facing Excel reporting.
+
+### 1) Spend concentration analysis — top 80% of vendor spend
+
+This query applies a Pareto-style view to identify which vendors represent the top 80% of total spend. It helps highlight vendor concentration and supports prioritization in supplier oversight and spend analysis.
+
+![SQL Analysis - Top 80 Percent of Vendor Spend](images/sql-q4-pareto-top-80-spend.png)
+
+### 2) Blocked invoices requiring immediate attention
+
+This query surfaces the longest blocked invoices by age, amount, and urgency. It is designed to support exception handling and help identify invoices that may require immediate operational follow-up.
+
+![SQL Analysis - Blocked Invoices Requiring Immediate Attention](images/sql-q7-blocked-invoices-attention.png)
+
+### 3) Vendors with highest late payment frequency
+
+This query measures which vendors show the highest frequency of late payments, along with average payment timing. It helps evaluate payment discipline and identify recurring patterns at the vendor level.
+
+![SQL Analysis - Vendors with Highest Late Payment Frequency](images/sql-q1-late-payment-frequency.png)
+
+## What the Dashboard Tracks 
 
 The dashboard is designed to support common AP and finance reporting needs, including:
 
@@ -54,7 +82,7 @@ The dashboard is designed to support common AP and finance reporting needs, incl
 - `data/` — source and supporting data files
 - `scripts/` — Python and SQL logic used in the pipeline
 - `output/` — generated outputs and analysis results
-- `images/` — project image assets
+- `images/` — dashboard, workflow, and SQL analysis image assets
 
 ## Why This Project Matters
 
